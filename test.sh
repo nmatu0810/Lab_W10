@@ -50,7 +50,7 @@ check_body "cgi path_info" "PATH_INFO=/x/y" "$URL/cgi-bin/env.cgi/x/y"
 check      "cgi HEAD"      200 -I "$URL/cgi-bin/hello.cgi"
 check      "cgi 404"       404 "$URL/cgi-bin/nothere.cgi"
 check      "cgi noexec"    403 "$URL/cgi-bin/noexec.cgi"
-check      "cgi ../"       403 --path-as-is "$URL/cgi-bin/../www/index.html"
+check      "cgi ../"       403 --path-as-is "$URL/cgi-bin/../../etc/passwd"
 check      "cgi loi"       500 "$URL/cgi-bin/bad.cgi"
 
 # ~user, chi test khi co ~/sws/index.html

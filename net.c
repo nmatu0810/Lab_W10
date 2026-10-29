@@ -209,7 +209,17 @@ handle_client(int fd, const struct sockaddr *client)
 
     memset(&r, 0, sizeof(r));
 
-    if ((err = parse_request(fd, &r)) != 0)
+    /*
+     * Trinh duyet hay mo san ket noi roi de do. Neu het timeout ma gui 400,
+     * trinh duyet co the dung lai ket noi nay va hien 400 cho trang khac.
+     * Nen khong nhan duoc gi thi dong im lang.
+     */
+    if ((err = parse_request(fd, &r)) < 0) {
+        close(fd);
+        return;
+    }
+
+    if (err != 0)
         send_error(fd, &r, err);
     else if (is_cgi(&r))
         serve_cgi(fd, &r, client);

@@ -38,7 +38,7 @@ extern struct config cfg;
 void handle_client(int fd, const struct sockaddr *client);
 void log_request(const struct sockaddr *client, const struct request *r);
 
-/* request.c - tra ve 0 neu ok, nguoc lai tra ma loi */
+/* request.c - tra ve 0 neu ok, -1 neu client khong gui gi, con lai la ma loi */
 int  parse_request(int fd, struct request *r);
 
 /* response.c */

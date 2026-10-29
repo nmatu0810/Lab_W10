@@ -210,24 +210,32 @@ url_text(FILE *out, const char *s, int keep_slash)
 	}
 }
 
+static int
+visible(const struct dirent *d)
+{
+	return d->d_name[0] != '.';
+}
+
 static void
 serve_directory(int fd, struct request *r, const char *url)
 {
-	DIR *dir = opendir(r->path);
+	struct dirent **list;
 	FILE *out;
-	struct dirent *entry;
 	char buf[16384];
 	off_t len;
-	int read_error;
 	size_t n;
+	int count, i;
 
-	if (dir == NULL) {
+	/* sap xep theo ten, bo file an */
+	if ((count = scandir(r->path, &list, visible, alphasort)) < 0) {
 		send_error(fd, r, file_error());
 		return;
 	}
 	out = tmpfile();
 	if (out == NULL) {
-		closedir(dir);
+		for (i = 0; i < count; i++)
+			free(list[i]);
+		free(list);
 		send_error(fd, r, 500);
 		return;
 	}
@@ -235,27 +243,20 @@ serve_directory(int fd, struct request *r, const char *url)
 	    "<title>Directory listing</title></head><body><h1>Index of ", out);
 	html_text(out, url);
 	fputs("</h1><ul>\n", out);
-	for (;;) {
-		errno = 0;
-		entry = readdir(dir);
-		if (entry == NULL) {
-			read_error = errno;
-			break;
-		}
-		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-			continue;
+	for (i = 0; i < count; i++) {
 		fputs("<li><a href=\"", out);
 		url_text(out, url, 1);
 		if (url[strlen(url) - 1] != '/')
 			fputc('/', out);
-		url_text(out, entry->d_name, 0);
+		url_text(out, list[i]->d_name, 0);
 		fputs("\">", out);
-		html_text(out, entry->d_name);
+		html_text(out, list[i]->d_name);
 		fputs("</a></li>\n", out);
+		free(list[i]);
 	}
-	closedir(dir);
+	free(list);
 	fputs("</ul></body></html>\n", out);
-	if (read_error != 0 || ferror(out) || fflush(out) != 0 ||
+	if (ferror(out) || fflush(out) != 0 ||
 	    (len = ftello(out)) < 0 || fseeko(out, 0, SEEK_SET) != 0) {
 		fclose(out);
 		send_error(fd, r, 500);

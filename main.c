@@ -138,10 +138,11 @@ if (cfg.logfile != NULL) {
     }
 
     if (cfg.addr != NULL) {
-    struct in_addr test_addr;
+    struct in6_addr test_addr;
 
-    if (inet_pton(AF_INET, cfg.addr, &test_addr) != 1) {
-        fprintf(stderr, "Invalid IPv4 address: %s\n",
+    if (inet_pton(AF_INET, cfg.addr, &test_addr) != 1 &&
+        inet_pton(AF_INET6, cfg.addr, &test_addr) != 1) {
+        fprintf(stderr, "Invalid IP address: %s\n",
                 cfg.addr);
         return EXIT_FAILURE;
     }
@@ -151,7 +152,7 @@ if (cfg.logfile != NULL) {
         printf("SWS starting...\n");
         printf("Port: %d\n", cfg.port);
         printf("Address: %s\n",
-               cfg.addr ? cfg.addr : "0.0.0.0");
+               cfg.addr ? cfg.addr : "any (IPv4 + IPv6)");
         printf("Document root: %s\n", cfg.docroot);
         printf("CGI directory: %s\n",
                cfg.cgidir ? cfg.cgidir : "(none)");

@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -26,53 +27,83 @@ reap_children(int sig)
     errno = saved_errno;
 }
 
+/*
+ * Tao socket lang nghe. Khong co -i thi dung IPv6 nhan ca IPv4,
+ * may khong ho tro IPv6 thi quay ve IPv4.
+ */
+static int
+open_socket(void)
+{
+    int fd;
+    int opt = 1;
+    int off = 0;
+    int use6;
+    struct sockaddr_in addr4;
+    struct sockaddr_in6 addr6;
+
+    memset(&addr4, 0, sizeof(addr4));
+    memset(&addr6, 0, sizeof(addr6));
+    addr4.sin_family = AF_INET;
+    addr4.sin_port = htons((unsigned short)cfg.port);
+    addr6.sin6_family = AF_INET6;
+    addr6.sin6_port = htons((unsigned short)cfg.port);
+
+    if (cfg.addr == NULL) {
+        addr4.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr6.sin6_addr = in6addr_any;
+        use6 = 1;
+    } else if (inet_pton(AF_INET, cfg.addr, &addr4.sin_addr) == 1) {
+        use6 = 0;
+    } else if (inet_pton(AF_INET6, cfg.addr, &addr6.sin6_addr) == 1) {
+        use6 = 1;
+    } else {
+        fprintf(stderr, "Invalid address: %s\n", cfg.addr);
+        exit(EXIT_FAILURE);
+    }
+
+    fd = socket(use6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0);
+    if (fd < 0 && use6 && cfg.addr == NULL) {
+        use6 = 0;
+        fd = socket(AF_INET, SOCK_STREAM, 0);
+    }
+    if (fd < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
+
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+                   &opt, sizeof(opt)) < 0) {
+        perror("setsockopt SO_REUSEADDR");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    if (use6)
+        setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+
+    if ((use6 ? bind(fd, (struct sockaddr *)&addr6, sizeof(addr6))
+              : bind(fd, (struct sockaddr *)&addr4, sizeof(addr4))) < 0) {
+        perror("bind");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    return fd;
+}
+
 /* Tao socket va cho client ket noi */
 void
 server_loop(void)
 {
     int server_fd;
     int client_fd;
-    int opt = 1;
-    struct sockaddr_in addr;
     struct sockaddr_storage client_addr;
     socklen_t client_len;
     struct sigaction sa;
     struct timeval timeout;
     pid_t pid;
 
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        perror("socket");
-        exit(EXIT_FAILURE);
-    }
-
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR,
-                   &opt, sizeof(opt)) < 0) {
-        perror("setsockopt SO_REUSEADDR");
-        close(server_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((unsigned short)cfg.port);
-
-    if (cfg.addr == NULL) {
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    } else if (inet_pton(AF_INET, cfg.addr,
-                         &addr.sin_addr) != 1) {
-        fprintf(stderr, "Invalid IPv4 address: %s\n",
-                cfg.addr);
-        close(server_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    if (bind(server_fd, (struct sockaddr *)&addr,
-             sizeof(addr)) < 0) {
-        perror("bind");
-        close(server_fd);
-        exit(EXIT_FAILURE);
-    }
+    server_fd = open_socket();
 
     if (listen(server_fd, 20) < 0) {
         perror("listen");
@@ -135,6 +166,7 @@ server_loop(void)
 
         if (pid == 0) {
             close(server_fd);
+            signal(SIGCHLD, SIG_DFL);
 
             handle_client(client_fd,
                           (struct sockaddr *)&client_addr);
@@ -144,6 +176,28 @@ server_loop(void)
 
         close(client_fd);
     }
+}
+
+/*
+ * Dong ket noi: neu client con du lieu chua doc (vd request loi) ma
+ * close() ngay thi kernel gui RST va client co the mat response.
+ */
+static void
+close_conn(int fd)
+{
+    struct timeval tv;
+    char buf[1024];
+
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+
+    shutdown(fd, SHUT_WR);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    while (read(fd, buf, sizeof(buf)) > 0)
+        ;
+
+    close(fd);
 }
 
 /* Xu ly mot ket noi HTTP */
@@ -163,7 +217,7 @@ handle_client(int fd, const struct sockaddr *client)
         serve_path(fd, &r);
 
     log_request(client, &r);
-    close(fd);
+    close_conn(fd);
 }
 
 /* Ghi log request */
@@ -171,7 +225,7 @@ void
 log_request(const struct sockaddr *client,
             const struct request *r)
 {
-    char ip[INET_ADDRSTRLEN] = "unknown";
+    char ip[INET6_ADDRSTRLEN] = "unknown";
     char date[64];
     char line[10240];
     time_t now;
@@ -185,6 +239,17 @@ log_request(const struct sockaddr *client,
 
         inet_ntop(AF_INET, &in->sin_addr,
                   ip, sizeof(ip));
+    } else if (client != NULL && client->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *in6 =
+            (const struct sockaddr_in6 *)client;
+
+        inet_ntop(AF_INET6, &in6->sin6_addr,
+                  ip, sizeof(ip));
+
+        /* client IPv4 qua socket IPv6: ::ffff:1.2.3.4 -> 1.2.3.4 */
+        if (strncmp(ip, "::ffff:", 7) == 0 &&
+            strchr(ip + 7, '.') != NULL)
+            memmove(ip, ip + 7, strlen(ip + 7) + 1);
     }
 
     now = time(NULL);

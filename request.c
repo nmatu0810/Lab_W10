@@ -177,6 +177,9 @@ parse_request(int fd, struct request *r)
 {
 	char line[MAX_LINE];
 	int len = read_line(fd, line, sizeof(line));
+	/* client khong gui gi: dong ket noi hoac het timeout */
+	if (len == -1)
+		return -1;
 	if (len <= 0)
 		return 400;
 

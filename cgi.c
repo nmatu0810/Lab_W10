@@ -188,6 +188,7 @@ serve_cgi(int fd, struct request *r, const struct sockaddr *client)
 	}
 	if (pid == 0) {
 		close(p[0]);
+		signal(SIGPIPE, SIG_DFL);
 		if ((devnull = open("/dev/null", O_RDWR)) >= 0)
 			dup2(devnull, STDIN_FILENO);
 		dup2(p[1], STDOUT_FILENO);

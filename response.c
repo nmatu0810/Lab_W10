@@ -92,11 +92,9 @@ send_headers(int fd, struct request *r, int status, const char *ctype,
 	off += snprintf(header + off, sizeof(header) - off,
 	    "Connection: close\r\n\r\n");
 
-	if (off > 0) {
-		ssize_t n = write_all(fd, header, (size_t)off);
-		if (n > 0)
-			r->sent += n;
-	}
+	/* sent chi dem byte body */
+	if (off > 0)
+		write_all(fd, header, (size_t)off);
 }
 
 void

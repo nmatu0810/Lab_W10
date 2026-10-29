@@ -292,6 +292,8 @@ parse_request(int fd, struct request *r)
 		drain_headers(fd);
 		return norm_err;
 	}
+	/* serve.c va cgi.c dung uri da decode, khong co query */
+	snprintf(r->uri, sizeof(r->uri), "%s", r->path);
 
 	while (1) {
 		len = read_line(fd, line, sizeof(line));
